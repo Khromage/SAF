@@ -1,7 +1,7 @@
 import spacy
 import pandas as pd
 
-# df = pd.read_csv(r'C:\Users\phanp\Downloads\IMDB')
+df = pd.read_csv(r'IMDB_Dataset.csv')
 
 # Load the English tokenizer and language model
 nlp = spacy.load('en_core_web_trf')
