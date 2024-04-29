@@ -45,12 +45,12 @@ def compute_metrics(pred):
 
 def main():
     # Load the dataset
-    dataset_path = 'Data/IMDB Dataset - 2500.csv'
+    dataset_path = 'Data/IMDB Dataset - 500.csv'
     data = pd.read_csv(dataset_path)
     data['sentiment'] = data['sentiment'].apply(lambda x: 1 if x == 'positive' else 0)
 
     # Split the data into training and testing
-    train_data, eval_data = train_test_split(data, test_size=0.2, random_state=42)
+    train_data, eval_data = train_test_split(data, test_size=0.3, random_state=42)
 
     # Create datasets
     train_dataset = ReviewDataset(train_data['review'].tolist(), train_data['sentiment'].tolist())
