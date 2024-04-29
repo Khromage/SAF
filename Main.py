@@ -1,22 +1,10 @@
 import torch
+import pandas as pd
 from transformers import DistilBertTokenizer, DistilBertForSequenceClassification, Trainer, TrainingArguments
 from torch.utils.data import Dataset
-import pandas as pd
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
 
-
-def compute_metrics(pred):
-    labels = pred.label_ids
-    preds = pred.predictions.argmax(-1)
-    acc = accuracy_score(labels, preds)
-    f1 = f1_score(labels, preds)
-    return {
-        'accuracy': acc,
-        'f1': f1
-    }
-
-
-# Define the dataset class compatible with BERT
 class ReviewDataset(Dataset):
     def __init__(self, reviews, sentiments):
         self.reviews = reviews
@@ -39,21 +27,34 @@ class ReviewDataset(Dataset):
             truncation=True,
             return_tensors='pt',
         )
-
         return {
             'input_ids': encoding['input_ids'].flatten(),
             'attention_mask': encoding['attention_mask'].flatten(),
             'labels': torch.tensor(sentiment, dtype=torch.long)
         }
 
+def compute_metrics(pred):
+    labels = pred.label_ids
+    preds = pred.predictions.argmax(-1)
+    acc = accuracy_score(labels, preds)
+    f1 = f1_score(labels, preds)
+    return {
+        'accuracy': acc,
+        'f1': f1
+    }
+
 def main():
     # Load the dataset
-    dataset_path = 'Data/IMDB Dataset - 500.csv'
+    dataset_path = 'Data/IMDB Dataset - 2500.csv'
     data = pd.read_csv(dataset_path)
     data['sentiment'] = data['sentiment'].apply(lambda x: 1 if x == 'positive' else 0)
 
-    # Create the dataset
-    dataset = ReviewDataset(data['review'].tolist(), data['sentiment'].tolist())
+    # Split the data into training and testing
+    train_data, eval_data = train_test_split(data, test_size=0.2, random_state=42)
+
+    # Create datasets
+    train_dataset = ReviewDataset(train_data['review'].tolist(), train_data['sentiment'].tolist())
+    eval_dataset = ReviewDataset(eval_data['review'].tolist(), eval_data['sentiment'].tolist())
 
     # Setting up the device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -81,8 +82,8 @@ def main():
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=dataset,  # training dataset
-        eval_dataset=dataset,   # evaluation dataset
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         compute_metrics=compute_metrics
     )
 
