@@ -1,118 +1,97 @@
-import spacy
-from spacytextblob.spacytextblob import SpacyTextBlob
+import torch
+from transformers import DistilBertTokenizer, DistilBertForSequenceClassification, Trainer, TrainingArguments
+from torch.utils.data import Dataset
 import pandas as pd
-from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score, f1_score
-import numpy as np
-import re
-
-# load dataset file
-
-pd.set_option('display.max_rows', None)  # Show all rows
-pd.set_option('display.max_columns', None)  # Show all columns
-pd.set_option('display.max_colwidth', 100)  # Show full width of each column
-
-# Load the English tokenizer and language model
-activated = spacy.require_gpu()
-nlp = spacy.load('en_core_web_trf')
-spacy_text_blob = SpacyTextBlob(nlp)
-nlp.add_pipe('spacytextblob')
 
 
-# Clean up data
-def clean_text(text):
-    # remove html line breaks
-    text = re.sub(r'<br\s*/?>', '', text)
-    #remove non-alphanumeric characters
-    #text = re.sub(r"[^a-zA-Z0-9]", ' ', text)
-    # Remove extra whitespaces
-    text = re.sub(r'\s+', ' ', text).strip()
-
-    # Lemmatization with SpaCy
-    cleaning_doc = nlp(text)
-    lemmatized_text = ' '.join([token.lemma_ for token in cleaning_doc])
-    return lemmatized_text
+def compute_metrics(pred):
+    labels = pred.label_ids
+    preds = pred.predictions.argmax(-1)
+    acc = accuracy_score(labels, preds)
+    f1 = f1_score(labels, preds)
+    return {
+        'accuracy': acc,
+        'f1': f1
+    }
 
 
+# Define the dataset class compatible with BERT
+class ReviewDataset(Dataset):
+    def __init__(self, reviews, sentiments):
+        self.reviews = reviews
+        self.sentiments = sentiments
+        self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
 
-# Function to analyze sentiment using SpaCyTextBlob
-def analyze_sentiment(text):
-    doc = nlp(text)
-    # filter features/token properties here
+    def __len__(self):
+        return len(self.reviews)
 
+    def __getitem__(self, idx):
+        review = self.reviews[idx]
+        sentiment = self.sentiments[idx]
+        encoding = self.tokenizer.encode_plus(
+            review,
+            add_special_tokens=True,
+            max_length=512,
+            return_token_type_ids=False,
+            padding='max_length',
+            return_attention_mask=True,
+            truncation=True,
+            return_tensors='pt',
+        )
 
-    # Return the sentiment
-    return doc._.blob.sentiment.polarity
+        return {
+            'input_ids': encoding['input_ids'].flatten(),
+            'attention_mask': encoding['attention_mask'].flatten(),
+            'labels': torch.tensor(sentiment, dtype=torch.long)
+        }
 
+def main():
+    # Load the dataset
+    dataset_path = 'Data/IMDB Dataset - 500.csv'
+    data = pd.read_csv(dataset_path)
+    data['sentiment'] = data['sentiment'].apply(lambda x: 1 if x == 'positive' else 0)
 
-# Load data
-def load_data(filepath):
-    data = pd.read_csv(filepath)
-    data['review'] = data['review'].apply(clean_text)
-    return data
+    # Create the dataset
+    dataset = ReviewDataset(data['review'].tolist(), data['sentiment'].tolist())
 
+    # Setting up the device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def perform_sentiment_analysis(filepath):
-    data = load_data(filepath)
-    kf = KFold(n_splits=7)  # 5-fold cross-validation
-    accuracies = []
-    f1_scores = []
-    all_predictions = []  # List to store all predictions
+    # Initialize the model
+    model = DistilBertForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=2)
+    model.to(device)
 
-    # Prepare data
-    for train_index, test_index in kf.split(data):
-        test_reviews = data.iloc[test_index]['review']
-        y_test = data.iloc[test_index]['sentiment'].apply(lambda x: 1 if x == 'positive' else 0).values
-        test_sentiments = [analyze_sentiment(review) for review in test_reviews]
-        predictions = ['positive' if score > 0 else 'negative' for score in test_sentiments]
-        predicted_labels = [1 if pred == 'positive' else 0 for pred in predictions]
+    # Define training arguments
+    training_args = TrainingArguments(
+        output_dir='./results',          # output directory
+        num_train_epochs=3,              # number of training epochs
+        per_device_train_batch_size=16,  # batch size for training
+        per_device_eval_batch_size=64,   # batch size for evaluation
+        warmup_steps=500,                # number of warmup steps for learning rate scheduler
+        weight_decay=0.01,               # strength of weight decay
+        logging_dir='./logs',            # directory for storing logs
+        logging_steps=10,
+        evaluation_strategy="epoch",     # evaluate each epoch
+        save_strategy="epoch",
+        load_best_model_at_end=True,     # load the best model at the end of training
+    )
 
-        # Store predictions
-        for review, actual, predicted, rating in zip(test_reviews, y_test, predicted_labels, test_sentiments):
-            all_predictions.append({'Review': review, 'Actual': actual, 'Predicted': predicted, 'Rating': ((rating+1)/2)})
+    # Initialize the Trainer
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset,  # training dataset
+        eval_dataset=dataset,   # evaluation dataset
+        compute_metrics=compute_metrics
+    )
 
-        # Calculate metrics
-        acc = accuracy_score(y_test, predicted_labels)
-        f1 = f1_score(y_test, predicted_labels)
-        accuracies.append(acc)
-        f1_scores.append(f1)
+    # Train the model
+    trainer.train()
 
+    # Evaluate the model
+    results = trainer.evaluate()
+    print(results)
 
-    # Convert predictions list to DataFrame and save or display
-    predictions_df = pd.DataFrame(all_predictions)
-    predictions_df.to_csv('movie_review_predictions.csv', index=False)
-    print(predictions_df.head(15))  # Optionally print the first few rows
-
-    # Print results
-    print(f"Average Model Accuracy: {np.mean(accuracies):.2f}")
-    print(f"Average Model F1 Score: {np.mean(f1_scores):.2f}")
-
-# If this script is the main program being executed
-if __name__ == "__main__":
-    perform_sentiment_analysis('Data/IMDB Dataset - 25000.csv')
-
-
-
-
-"""
-df = pd.read_csv(r'Data/IMDB Dataset MINIMIZED.csv')
-
-
-review_set = df.iloc[:, 0].tolist()
-
-# spacy default pipeline
-print("Default spacy tokens:")
-for review in review_set:
-    print(review)
-    doc = nlp(clean_text(review))
-    #doc = nlp(review)
-    # all desired properties from tokens picked here
-    print([[token.text, token.pos_] for token in doc if not token.is_stop and not token.is_punct])
-
-    #for sentence in doc.sents:
-    #    print(sentence._.blob.sentiment)
-
-    print(doc._.blob.sentiment)
-
-    print()
-"""
+if __name__ == '__main__':
+    main()
