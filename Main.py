@@ -5,6 +5,7 @@ from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
 
+# Prepare Dataset for Training and Testing
 class ReviewDataset(Dataset):
     def __init__(self, reviews, sentiments):
         self.reviews = reviews
@@ -33,6 +34,7 @@ class ReviewDataset(Dataset):
             'labels': torch.tensor(sentiment, dtype=torch.long)
         }
 
+# Accuracy and F1 Metrics
 def compute_metrics(pred):
     labels = pred.label_ids
     preds = pred.predictions.argmax(-1)
@@ -45,7 +47,7 @@ def compute_metrics(pred):
 
 def main():
     # Load the dataset
-    dataset_path = 'Data/IMDB Dataset - 500.csv'
+    dataset_path = 'Data/IMDB Dataset - 10000.csv'
     data = pd.read_csv(dataset_path)
     data['sentiment'] = data['sentiment'].apply(lambda x: 1 if x == 'positive' else 0)
 
@@ -65,17 +67,18 @@ def main():
 
     # Define training arguments
     training_args = TrainingArguments(
-        output_dir='./results',          # output directory
-        num_train_epochs=3,              # number of training epochs
-        per_device_train_batch_size=16,  # batch size for training
-        per_device_eval_batch_size=64,   # batch size for evaluation
-        warmup_steps=500,                # number of warmup steps for learning rate scheduler
-        weight_decay=0.01,               # strength of weight decay
-        logging_dir='./logs',            # directory for storing logs
+        output_dir='./results',
+        num_train_epochs=3,
+        per_device_train_batch_size=16,
+        per_device_eval_batch_size=64,
+        warmup_steps=500,
+        weight_decay=0.01,
+        logging_dir='./logs',
         logging_steps=10,
-        evaluation_strategy="epoch",     # evaluate each epoch
+        evaluation_strategy="epoch",
         save_strategy="epoch",
-        load_best_model_at_end=True,     # load the best model at the end of training
+        # Load only the best model at the end of all training epochs
+        load_best_model_at_end=True,
     )
 
     # Initialize the Trainer
@@ -87,10 +90,10 @@ def main():
         compute_metrics=compute_metrics
     )
 
-    # Train the model
+    # Train
     trainer.train()
 
-    # Evaluate the model
+    # Evaluate
     results = trainer.evaluate()
     print(results)
 
